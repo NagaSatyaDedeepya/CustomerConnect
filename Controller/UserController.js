@@ -3,70 +3,56 @@ const multer = require('multer');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const path = require('path');
-const User = require('../models/User');
+const User = require('../Model/User');
 
-const router = express.Router();
+
 require('dotenv').config(); // Ensure .env is loaded
 
-// Multer config using .env upload directory
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadPath = path.join(__dirname, '..', process.env.UPLOAD_DIR || 'uploads/logos');
-    cb(null, uploadPath);
-  },
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + '-' + file.originalname);
-  },
-});
-const upload = multer({ storage });
-
 // POST /api/users/register
-const customerRegister=async(req,res)=>{
+const customerRegister = async (req, res) => {
+  console.log("==> Controller: customerRegister hit");
+  console.log('req.body:', req.body);
+  console.log('req.file:', req.file);
+
   try {
     const {
       fullName, phoneNumber, email, password, confirmPassword,
       businessName, website, address, city, state, zipcode
     } = req.body;
 
-    // Check required fields
     if (!fullName || !phoneNumber || !email || !password || !confirmPassword) {
-      return res.status(400).json({ error: 'Full Name, Phone Number, Email, Password, and Confirm Password are required' });
+      return res.status(400).json({ error: 'Required fields missing' });
     }
 
-    // Password match check
     if (password !== confirmPassword) {
-      return res.status(400).json({ error: 'Password and Confirm Password do not match' });
+      return res.status(400).json({ error: 'Passwords do not match' });
     }
 
-    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Create user object
+    const logoImageUrl = req.file ? `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}` : null;
+
     const user = new User({
-      fullName,
-      phoneNumber,
-      email,
-      password: hashedPassword,
+      fullName, phoneNumber, email, password: hashedPassword,
       businessName: businessName || null,
       website: website || null,
       address: address || null,
       city: city || null,
       state: state || null,
       zipcode: zipcode || null,
-      logoImageUrl: req.file ? req.file.path : null,
+      logoImageUrl
     });
 
     const savedUser = await user.save();
-    res.status(201).json({ message: 'User registered successfully', userId: savedUser._id });
+    res.status(201).json({ message: 'User registered', userId: savedUser._id });
 
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to register user' });
   }
 };
-const bcrypt = require('bcryptjs');
-const User = require('../models/User');
 
+//User Login
 const customerLogin = async (req, res) => {
     try {
       const { email, password } = req.body;
@@ -102,6 +88,8 @@ const customerLogin = async (req, res) => {
       res.status(500).json({ error: 'Login failed' });
     }
   };
+
+
 // Update Details
 const updateCustomerDetails = async (req, res) => {
   try {
@@ -135,6 +123,8 @@ const updateCustomerDetails = async (req, res) => {
     res.status(500).json({ error: 'Failed to update user details' });
   }
 };
+
+//Get all users
 const getAllUsers = async (req, res) => {
     try {
       const users = await User.find().select('-password'); // exclude password
