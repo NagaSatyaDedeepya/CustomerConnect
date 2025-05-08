@@ -8,7 +8,7 @@ const multer = require('multer');
 const xlsx = require('xlsx');
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
-
+const mongoose = require('mongoose');
 
 // Add single customer
 const addCustomer = async (req, res) => {
@@ -106,8 +106,53 @@ const getUserCustomers = async (req, res) => {
   }
 };
 
+//Edit Customer
+const editCustomerById = async (req, res) => {
+  try {
+    const customerId = req.params.id.trim(); // Trim whitespace
+    const updateData = req.body;
+
+    const updated = await Customer.findByIdAndUpdate(customerId, updateData, { new: true });
+
+    if (!updated) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+
+    res.status(200).json({ message: 'Customer updated successfully', customer: updated });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update customer' });
+  }
+};
+const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(id) && id.length === 24;
+//Delete customer
+const deleteCustomerById = async (req, res) => {
+  try {
+    const id = req.params.id.trim();
+
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({ error: 'Invalid customer ID format' });
+    }
+
+    const deleted = await Customer.findByIdAndDelete(id);
+
+    if (!deleted) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+
+    res.status(200).json({ message: 'Customer deleted successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete customer' });
+  }
+};
+
+
+
 module.exports = {
   addCustomer,
   addBulkCustomers,
-  getUserCustomers
+  getUserCustomers,
+  editCustomerById,
+  deleteCustomerById
 };

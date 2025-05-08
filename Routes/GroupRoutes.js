@@ -1,7 +1,7 @@
 // routes/groupRoutes.js
 const express = require('express');
-const authenticateUser = require('../middleware/auth'); // Middleware to verify JWT token
-const { createGroup } = require('../controllers/groupController');
+const authenticateUser = require('../Security/Middleware'); // Middleware to verify JWT token
+const { createGroup } = require('../Controller/GroupController');
 
 const router = express.Router();
 
