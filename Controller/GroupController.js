@@ -37,4 +37,25 @@ const createGroup = async (req, res) => {
   }
 };
 
-module.exports = { createGroup };
+const getCustomersByGroupId = async (req, res) => {
+  try {
+    const { groupId } = req.params;
+
+    if (!groupId) {
+      return res.status(400).json({ message: 'groupId is required' });
+    }
+
+    const customers = await Customer.find({ group: groupId });
+
+    if (!customers.length) {
+      return res.status(404).json({ message: 'No customers found for this group' });
+    }
+
+    res.status(200).json({ customers });
+  } catch (error) {
+    console.error('Error fetching customers by groupId:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+};
+
+module.exports = { createGroup,getCustomersByGroupId  };
