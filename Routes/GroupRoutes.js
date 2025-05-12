@@ -7,6 +7,6 @@ const router = express.Router();
 
 // Create a new group
 router.post('/create', authenticateUser, createGroup);
-router.post('/get', authenticateUser, getCustomersByGroupId);
+router.get('/get/:groupId', authenticateUser, getCustomersByGroupId);
 
 module.exports = router;
