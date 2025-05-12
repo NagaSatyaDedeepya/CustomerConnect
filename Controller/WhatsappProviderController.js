@@ -105,7 +105,6 @@ const sendWhatsAppToCustomers = async (req, res) => {
   }
 };
 
-
 const sendWhatsAppToGroup = async (req, res) => {
   try {
     const {
@@ -114,68 +113,63 @@ const sendWhatsAppToGroup = async (req, res) => {
       campaignName,
       imageUrl,
       fallbackFirstName = 'user',
-      languageCode = 'en' // Added default for languageCode
+      customMessage, // 👈 New message from Postman
+      languageCode = 'en'
     } = req.body;
 
-    // Validate required fields
-    if (!groupId || !templateName || !campaignName || !imageUrl) {
+    if (!groupId || !templateName || !campaignName || !imageUrl || !customMessage) {
       return res.status(400).json({
-        error: 'groupId, templateName, campaignName, and imageUrl are required'
+        error: 'groupId, templateName, campaignName, imageUrl, and customMessage are required'
       });
     }
 
-    // 1. Get user's WhatsApp API credentials
     const provider = await WhatsAppProvider.findOne({ createdBy: req.userId });
     if (!provider) {
       return res.status(404).json({ error: 'WhatsApp provider not found for user' });
     }
 
-    // 2. Get group with populated customers
     const group = await Group.findOne({ _id: groupId, userId: req.userId }).populate('customers');
     if (!group || !group.customers || group.customers.length === 0) {
       return res.status(404).json({ error: 'Group not found or no customers in the group' });
     }
 
     const apiKey = provider.apiKey;
-   
     const url = 'https://backend.aisensy.com/campaign/t1/api/v2';
-     console.log(`Using API key: ${apiKey}`); // For debugging purposes
-    // 3. Send message to each customer
+
     for (const customer of group.customers) {
-     const data = {
-      apiKey: apiKey,
-  campaignName,
-  destination: `91${customer.phoneNumber}`,
-  userName: "Incrivelsoft Private Limited",
-  templateParams: [customer.fullName],
-  source: 'group-campaign',
-  media: {
-    url: imageUrl,
-    filename: 'image'
-  },
-  buttons: [],
-  carouselCards: [],
-  location: {},
-  attributes: {},
-  paramsFallbackValue: {
-    FirstName: customer.fullName || fallbackFirstName
-  }
-  
-};
-console.log(data.destination)
-console.log(data.templateParams)
+      const fullName = customer.fullName || fallbackFirstName;
+
+      const data = {
+        apiKey,
+        campaignName,
+        destination: `91${customer.phoneNumber}`,
+        userName: "Private Limited",
+        templateParams: [fullName, customMessage], // 👈 Name + offer/message
+        source: "new-landing-page form",
+        media: {
+          url: imageUrl,
+          filename: "sample_media"
+        },
+        buttons: [],
+        carouselCards: [],
+        location: {},
+        attributes: {},
+        paramsFallbackValue: {
+          FirstName: fallbackFirstName
+        }
+      };
+
+      console.log(`Sending to: ${data.destination}`);
+      console.log(`Template Params: ${data.templateParams}`);
 
       try {
         await axios.post(url, data, {
-          headers: {
-            'Content-Type': 'application/json'
-          }
+          headers: { 'Content-Type': 'application/json' }
         });
-      
-        console.log(`✅ Sent to ${customer.fullName} (${customer.phoneNumber})`);
+
+        console.log(`✅ Sent to ${fullName} (${customer.phoneNumber})`);
       } catch (err) {
-        console.error(`❌ Failed for ${customer.fullName} (${customer.phoneNumber}: `, err.response?.data || err.message);
-        // console.log(err.response)
+        console.error(`❌ Failed for ${fullName} (${customer.phoneNumber}):`, err.response?.data || err.message);
       }
     }
 
@@ -186,6 +180,7 @@ console.log(data.templateParams)
     res.status(500).json({ error: 'Failed to send messages to group' });
   }
 };
+
 const sendWhatsAppToCustomersFromExcel = async (req, res) => {
   try {
     const { templateName, campaignName, imageUrl, languageCode = 'en', fallbackFirstName = 'user' } = req.body;
