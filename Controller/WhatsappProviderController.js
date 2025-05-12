@@ -97,123 +97,51 @@ const sendWhatsAppToCustomers = async (req, res) => {
   }
 };
 
-// const sendWhatsAppToGroup = async (req, res) => {
-//   try {
-//     const { groupId, templateName, campaignName, languageCode = 'en' } = req.body;
-
-//     // Validate input
-//     if (!groupId || !templateName || !campaignName) {
-//       return res.status(400).json({ error: 'groupId, templateName, and campaignName are required' });
-//     }
-
-//     // 1. Get user's WhatsApp API credentials
-//     const provider = await WhatsAppProvider.findOne({ createdBy: req.userId });
-//     if (!provider) {
-//       return res.status(404).json({ error: 'WhatsApp provider not found for user' });
-//     }
-
-//     // 2. Get group with populated customers
-//     const group = await Group.findOne({ _id: groupId, userId: req.userId }).populate('customers');
-//     if (!group || !group.customers || group.customers.length === 0) {
-//       return res.status(404).json({ error: 'Group not found or no customers in the group' });
-//     }
-
-//     const apiKey = provider.apiKey;
-//     const url = 'https://backend.aisensy.com/campaign/message';
-
-//     // 3. Send WhatsApp message to each customer
-//     for (const customer of group.customers) {
-//       const data = {
-//         campaignName,
-//         destination: `91${customer.phoneNumber}`, // Format with country code
-//         user: {
-//           name: customer.fullName
-//         },
-//         template: {
-//           name: templateName,
-//           languageCode,
-//           // Optional dynamic parameters (must match your AiSensy template structure)
-//           components: [
-//             {
-//               type: 'body',
-//               parameters: [
-//                 { type: 'text', text: customer.fullName },
-//                 // Add more parameters here if your template expects more
-//               ]
-//             }
-//           ]
-//         }
-//       };
-
-//       try {
-//         await axios.post(url, data, {
-//           headers: {
-//             'Content-Type': 'application/json',
-//             'Authorization': apiKey
-//           }
-//         });
-//         console.log(`✅ Message sent to ${customer.fullName}`);
-//       } catch (err) {
-//         console.error(`❌ Error sending to ${customer.fullName}:`, err.response?.data || err.message);
-//       }
-//     }
-
-//     res.status(200).json({ message: 'Messages sent to all customers in the group' });
-
-//   } catch (err) {
-//     console.error('❌ Error in sendWhatsAppToGroup:', err);
-//     res.status(500).json({ error: 'Failed to send messages to group' });
-//   }
-// };
 const sendWhatsAppToGroup = async (req, res) => {
   try {
-    const {
-      groupId,
-      templateName,
-      campaignName,
-      imageUrl,
-      fallbackFirstName = 'user'
-    } = req.body;
+    const { groupId, templateName, campaignName, languageCode = 'en' } = req.body;
 
-    if (!groupId || !templateName || !campaignName || !imageUrl) {
-      return res.status(400).json({
-        error: 'groupId, templateName, campaignName, and imageUrl are required'
-      });
+    // Validate input
+    if (!groupId || !templateName || !campaignName) {
+      return res.status(400).json({ error: 'groupId, templateName, and campaignName are required' });
     }
 
-    // 1. Get WhatsApp credentials
+    // 1. Get user's WhatsApp API credentials
     const provider = await WhatsAppProvider.findOne({ createdBy: req.userId });
     if (!provider) {
       return res.status(404).json({ error: 'WhatsApp provider not found for user' });
     }
 
-    // 2. Get group and customers
+    // 2. Get group with populated customers
     const group = await Group.findOne({ _id: groupId, userId: req.userId }).populate('customers');
-    if (!group || group.customers.length === 0) {
-      return res.status(404).json({ error: 'Group not found or no customers in group' });
+    if (!group || !group.customers || group.customers.length === 0) {
+      return res.status(404).json({ error: 'Group not found or no customers in the group' });
     }
 
     const apiKey = provider.apiKey;
-    const url = 'https://backend.aisensy.com/campaign/t1/api/v2';
+    const url = 'https://backend.aisensy.com/campaign/message';
 
-    // 3. Send message to each customer
+    // 3. Send WhatsApp message to each customer
     for (const customer of group.customers) {
       const data = {
         campaignName,
-        destination: `91${customer.phoneNumber}`, // include country code
-        userName: customer.fullName,
-        templateParams: [customer.fullName], // adapt if more params are used in template
-        source: 'group-campaign',
-        media: {
-          url: imageUrl,
-          filename: 'image'
+        destination: `91${customer.phoneNumber}`, // Format with country code
+        user: {
+          name: customer.fullName
         },
-        buttons: [],
-        carouselCards: [],
-        location: {},
-        attributes: {},
-        paramsFallbackValue: {
-          FirstName: fallbackFirstName
+        template: {
+          name: templateName,
+          languageCode,
+          // Optional dynamic parameters (must match your AiSensy template structure)
+          components: [
+            {
+              type: 'body',
+              parameters: [
+                { type: 'text', text: customer.fullName },
+                // Add more parameters here if your template expects more
+              ]
+            }
+          ]
         }
       };
 
@@ -221,20 +149,20 @@ const sendWhatsAppToGroup = async (req, res) => {
         await axios.post(url, data, {
           headers: {
             'Content-Type': 'application/json',
-            'apiKey': apiKey
+            'Authorization': apiKey
           }
         });
-        console.log(`✅ Sent to ${customer.fullName} (${customer.phoneNumber})`);
+        console.log(`✅ Message sent to ${customer.fullName}`);
       } catch (err) {
-        console.error(`❌ Failed for ${customer.fullName}:`, err.response?.data || err.message);
+        console.error(`❌ Error sending to ${customer.fullName}:`, err.response?.data || err.message);
       }
     }
 
-    res.status(200).json({ message: 'Messages sent to group customers' });
+    res.status(200).json({ message: 'Messages sent to all customers in the group' });
 
   } catch (err) {
     console.error('❌ Error in sendWhatsAppToGroup:', err);
-    res.status(500).json({ error: 'Failed to send WhatsApp messages to group' });
+    res.status(500).json({ error: 'Failed to send messages to group' });
   }
 };
 
