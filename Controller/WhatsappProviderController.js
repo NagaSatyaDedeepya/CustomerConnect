@@ -29,73 +29,73 @@ const createWhatsAppProvider = async (req, res) => {
   }
 };
 
-// const sendWhatsAppToCustomers = async (req, res) => {
-//   try {
-//     const { templateName, campaignName, languageCode = 'en' } = req.body;
+const sendWhatsAppToCustomers = async (req, res) => {
+  try {
+    const { templateName, campaignName, languageCode = 'en' } = req.body;
 
-//     // Validate input
-//     if (!templateName || !campaignName) {
-//       return res.status(400).json({ error: 'templateName and campaignName are required' });
-//     }
+    // Validate input
+    if (!templateName || !campaignName) {
+      return res.status(400).json({ error: 'templateName and campaignName are required' });
+    }
 
-//     // Step 1: Get WhatsApp credentials for the user
-//     const provider = await WhatsAppProvider.findOne({ createdBy: req.userId });
-//     if (!provider) {
-//       return res.status(404).json({ error: 'WhatsApp provider not found for user' });
-//     }
+    // Step 1: Get WhatsApp credentials for the user
+    const provider = await WhatsAppProvider.findOne({ createdBy: req.userId });
+    if (!provider) {
+      return res.status(404).json({ error: 'WhatsApp provider not found for user' });
+    }
 
-//     const apiKey = provider.apiKey;
-//     const url = 'https://backend.aisensy.com/campaign/message';
+    const apiKey = provider.apiKey;
+    const url = 'https://backend.aisensy.com/campaign/message';
 
-//     // Step 2: Get customers of this user
-//     const customers = await Customer.find({ createdBy: req.userId });
-//     if (customers.length === 0) {
-//       return res.status(404).json({ error: 'No customers found for this user' });
-//     }
+    // Step 2: Get customers of this user
+    const customers = await Customer.find({ createdBy: req.userId });
+    if (customers.length === 0) {
+      return res.status(404).json({ error: 'No customers found for this user' });
+    }
 
-//     // Step 3: Send messages one by one
-//     for (const customer of customers) {
-//       const data = {
-//         campaignName,
-//         destination: `91${customer.phoneNumber}`, // Include country code
-//         user: {
-//           name: customer.fullName
-//         },
-//         template: {
-//           name: templateName,
-//           languageCode,
-//           components: [
-//             {
-//               type: 'body',
-//               parameters: [
-//                 { type: 'text', text: customer.fullName }
-//                 // Add more parameters here if your template needs them
-//               ]
-//             }
-//           ]
-//         }
-//       };
+    // Step 3: Send messages one by one
+    for (const customer of customers) {
+      const data = {
+        campaignName,
+        destination: `91${customer.phoneNumber}`, // Include country code
+        user: {
+          name: customer.fullName
+        },
+        template: {
+          name: templateName,
+          languageCode,
+          components: [
+            {
+              type: 'body',
+              parameters: [
+                { type: 'text', text: customer.fullName }
+                // Add more parameters here if your template needs them
+              ]
+            }
+          ]
+        }
+      };
 
-//       try {
-//         await axios.post(url, data, {
-//           headers: {
-//             'Content-Type': 'application/json',
-//             'Authorization': apiKey
-//           }
-//         });
-//         console.log(`✅ Message sent to ${customer.fullName} (${customer.phoneNumber})`);
-//       } catch (err) {
-//         console.error(`❌ Failed to send to ${customer.fullName}:`, err.response?.data || err.message);
-//       }
-//     }
+      try {
+        await axios.post(url, data, {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': apiKey
+          }
+        });
+        console.log(`✅ Message sent to ${customer.fullName} (${customer.phoneNumber})`);
+      } catch (err) {
+        console.error(`❌ Failed to send to ${customer.fullName}:`, err.response?.data || err.message);
+      }
+    }
 
-//     res.status(200).json({ message: 'Messages sent to all customers (check server logs for failures)' });
+    res.status(200).json({ message: 'Messages sent to all customers (check server logs for failures)' });
 
-//   } catch (err) {
-//     console.error('❌ Error in sendWhatsAppToCustomers:', err);
-//     res.status(500).json({ error: 'Failed to send WhatsApp messages' });
-//   }
-// };
+  } catch (err) {
+    console.error('❌ Error in sendWhatsAppToCustomers:', err);
+    res.status(500).json({ error: 'Failed to send WhatsApp messages' });
+  }
+};
 
 // const sendWhatsAppToGroup = async (req, res) => {
 //   try {
