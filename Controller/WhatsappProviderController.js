@@ -28,82 +28,100 @@ const createWhatsAppProvider = async (req, res) => {
     res.status(500).json({ error: 'Failed to create WhatsApp provider' });
   }
 };
-
 const sendWhatsAppToCustomers = async (req, res) => {
   try {
-    const { templateName, campaignName, languageCode = 'en' } = req.body;
+    const {
+      customerIds, // Array of MongoDB ObjectIds
+      campaignName,
+      templateName,
+      imageUrl,
+      fallbackFirstName = 'user',
+      languageCode = 'en'
+    } = req.body;
 
     // Validate input
-    if (!templateName || !campaignName) {
-      return res.status(400).json({ error: 'templateName and campaignName are required' });
+    if (!customerIds || !Array.isArray(customerIds) || customerIds.length === 0 || !campaignName || !imageUrl) {
+      return res.status(400).json({ error: 'customerIds, campaignName, and imageUrl are required' });
     }
 
-    // Step 1: Get WhatsApp credentials for the user
+    // 1. Get user's WhatsApp API credentials
     const provider = await WhatsAppProvider.findOne({ createdBy: req.userId });
     if (!provider) {
       return res.status(404).json({ error: 'WhatsApp provider not found for user' });
     }
 
     const apiKey = provider.apiKey;
-    const url = 'https://backend.aisensy.com/campaign/message';
+    const url = 'https://backend.aisensy.com/campaign/t1/api/v2';
 
-    // Step 2: Get customers of this user
-    const customers = await Customer.find({ createdBy: req.userId });
-    if (customers.length === 0) {
-      return res.status(404).json({ error: 'No customers found for this user' });
+    // 2. Fetch selected customers
+    const customers = await Customer.find({ _id: { $in: customerIds }, userId: req.userId });
+    if (!customers || customers.length === 0) {
+      return res.status(404).json({ error: 'No matching customers found for provided IDs' });
     }
 
-    // Step 3: Send messages one by one
+    // 3. Send message to each customer
     for (const customer of customers) {
       const data = {
+        apiKey: apiKey,
         campaignName,
-        destination: `91${customer.phoneNumber}`, // Include country code
-        user: {
-          name: customer.fullName
+        destination: `91${customer.phoneNumber}`,
+        userName: "Incrivelsoft Private Limited",
+        templateParams: [customer.fullName || fallbackFirstName],
+        source: 'selected-customer-campaign',
+        media: {
+          url: imageUrl,
+          filename: 'image'
         },
-        template: {
-          name: templateName,
-          languageCode,
-          components: [
-            {
-              type: 'body',
-              parameters: [
-                { type: 'text', text: customer.fullName }
-                // Add more parameters here if your template needs them
-              ]
-            }
-          ]
+        buttons: [],
+        carouselCards: [],
+        location: {},
+        attributes: {},
+        paramsFallbackValue: {
+          FirstName: customer.fullName || fallbackFirstName
         }
       };
+
+      console.log('Sending to:', data.destination, 'with name:', customer.fullName);
 
       try {
         await axios.post(url, data, {
           headers: {
-            'Content-Type': 'application/json',
-            'Authorization': apiKey
+            'Content-Type': 'application/json'
+            // ❌ Do not include 'Authorization' or 'apiKey' in headers
           }
         });
-        console.log(`✅ Message sent to ${customer.fullName} (${customer.phoneNumber})`);
+
+        console.log(`✅ Sent to ${customer.fullName} (${customer.phoneNumber})`);
       } catch (err) {
-        console.error(`❌ Failed to send to ${customer.fullName}:`, err.response?.data || err.message);
+        console.error(`❌ Failed for ${customer.fullName} (${customer.phoneNumber}):`, err.response?.data || err.message);
       }
     }
 
-    res.status(200).json({ message: 'Messages sent to all customers (check server logs for failures)' });
+    res.status(200).json({ message: 'Messages sent to selected customers' });
 
   } catch (err) {
     console.error('❌ Error in sendWhatsAppToCustomers:', err);
-    res.status(500).json({ error: 'Failed to send WhatsApp messages' });
+    res.status(500).json({ error: 'Failed to send messages to selected customers' });
   }
 };
 
+
 const sendWhatsAppToGroup = async (req, res) => {
   try {
-    const { groupId, templateName, campaignName, languageCode = 'en' } = req.body;
+    const {
+      groupId,
+      templateName,
+      campaignName,
+      imageUrl,
+      fallbackFirstName = 'user',
+      languageCode = 'en' // Added default for languageCode
+    } = req.body;
 
-    // Validate input
-    if (!groupId || !templateName || !campaignName) {
-      return res.status(400).json({ error: 'groupId, templateName, and campaignName are required' });
+    // Validate required fields
+    if (!groupId || !templateName || !campaignName || !imageUrl) {
+      return res.status(400).json({
+        error: 'groupId, templateName, campaignName, and imageUrl are required'
+      });
     }
 
     // 1. Get user's WhatsApp API credentials
@@ -119,42 +137,45 @@ const sendWhatsAppToGroup = async (req, res) => {
     }
 
     const apiKey = provider.apiKey;
-    const url = 'https://backend.aisensy.com/campaign/message';
-
-    // 3. Send WhatsApp message to each customer
+   
+    const url = 'https://backend.aisensy.com/campaign/t1/api/v2';
+     console.log(`Using API key: ${apiKey}`); // For debugging purposes
+    // 3. Send message to each customer
     for (const customer of group.customers) {
-      const data = {
-        campaignName,
-        destination: `91${customer.phoneNumber}`, // Format with country code
-        user: {
-          name: customer.fullName
-        },
-        template: {
-          name: templateName,
-          languageCode,
-          // Optional dynamic parameters (must match your AiSensy template structure)
-          components: [
-            {
-              type: 'body',
-              parameters: [
-                { type: 'text', text: customer.fullName },
-                // Add more parameters here if your template expects more
-              ]
-            }
-          ]
-        }
-      };
+     const data = {
+      apiKey: apiKey,
+  campaignName,
+  destination: `91${customer.phoneNumber}`,
+  userName: "Incrivelsoft Private Limited",
+  templateParams: [customer.fullName],
+  source: 'group-campaign',
+  media: {
+    url: imageUrl,
+    filename: 'image'
+  },
+  buttons: [],
+  carouselCards: [],
+  location: {},
+  attributes: {},
+  paramsFallbackValue: {
+    FirstName: customer.fullName || fallbackFirstName
+  }
+  
+};
+console.log(data.destination)
+console.log(data.templateParams)
 
       try {
         await axios.post(url, data, {
           headers: {
-            'Content-Type': 'application/json',
-            'Authorization': apiKey
+            'Content-Type': 'application/json'
           }
         });
-        console.log(`✅ Message sent to ${customer.fullName}`);
+      
+        console.log(`✅ Sent to ${customer.fullName} (${customer.phoneNumber})`);
       } catch (err) {
-        console.error(`❌ Error sending to ${customer.fullName}:`, err.response?.data || err.message);
+        console.error(`❌ Failed for ${customer.fullName} (${customer.phoneNumber}: `, err.response?.data || err.message);
+        // console.log(err.response)
       }
     }
 
@@ -165,14 +186,13 @@ const sendWhatsAppToGroup = async (req, res) => {
     res.status(500).json({ error: 'Failed to send messages to group' });
   }
 };
-
-
 const sendWhatsAppToCustomersFromExcel = async (req, res) => {
   try {
-    const { templateName, campaignName, languageCode = 'en' } = req.body;
+    const { templateName, campaignName, imageUrl, languageCode = 'en', fallbackFirstName = 'user' } = req.body;
 
-    if (!templateName || !campaignName) {
-      return res.status(400).json({ error: 'templateName and campaignName are required' });
+    // Validate input
+    if (!templateName || !campaignName || !imageUrl) {
+      return res.status(400).json({ error: 'templateName, campaignName, and imageUrl are required' });
     }
 
     // Validate uploaded file
@@ -180,7 +200,7 @@ const sendWhatsAppToCustomersFromExcel = async (req, res) => {
       return res.status(400).json({ error: 'Excel file is required' });
     }
 
-    // Read Excel file
+    // Read the Excel file
     const filePath = path.join(__dirname, '..', 'uploads', 'excels', req.file.filename);
     const workbook = xlsx.readFile(filePath);
     const sheetName = workbook.SheetNames[0];
@@ -197,9 +217,9 @@ const sendWhatsAppToCustomersFromExcel = async (req, res) => {
     }
 
     const apiKey = provider.apiKey;
-    const url = 'https://backend.aisensy.com/campaign/message';
+    const url = 'https://backend.aisensy.com/campaign/t1/api/v2';
 
-    // Loop through each row of Excel
+    // Loop through each row in the Excel sheet
     for (const row of sheetData) {
       const fullName = row.fullName || row.name || row.Name;
       const phoneNumber = row.phoneNumber || row.Phone || row.phone;
@@ -209,47 +229,49 @@ const sendWhatsAppToCustomersFromExcel = async (req, res) => {
         continue;
       }
 
+      // Prepare the data to send to AiSensy
       const data = {
+        apiKey: apiKey,
         campaignName,
         destination: `91${phoneNumber}`,
-        user: {
-          name: fullName
+        userName: "Incrivelsoft Private Limited", // You can change this if needed
+        templateParams: [fullName || fallbackFirstName],
+        source: 'excel-customer-campaign',
+        media: {
+          url: imageUrl,
+          filename: 'image'
         },
-        template: {
-          name: templateName,
-          languageCode,
-          components: [
-            {
-              type: 'body',
-              parameters: [
-                { type: 'text', text: fullName }
-              ]
-            }
-          ]
+        buttons: [],
+        carouselCards: [],
+        location: {},
+        attributes: {},
+        paramsFallbackValue: {
+          FirstName: fullName || fallbackFirstName
         }
       };
+
+      console.log(`Sending to ${fullName} (${phoneNumber})`);
 
       try {
         await axios.post(url, data, {
           headers: {
-            'Content-Type': 'application/json',
-            Authorization: apiKey
+            'Content-Type': 'application/json'
           }
         });
+
         console.log(`✅ Sent to ${fullName} (${phoneNumber})`);
       } catch (err) {
         console.error(`❌ Failed for ${fullName}:`, err.response?.data || err.message);
       }
     }
 
-    res.status(200).json({ message: 'WhatsApp messages sent from Excel (check server logs)' });
+    res.status(200).json({ message: 'WhatsApp messages sent to customers from Excel (check server logs)' });
 
   } catch (err) {
     console.error('❌ Error sending messages from Excel:', err);
     res.status(500).json({ error: 'Internal server error while sending messages' });
   }
 };
-
 
 
 module.exports = {
