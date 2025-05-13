@@ -8,6 +8,7 @@ const customerRoutes = require('./Routes/CustomerRoutes');
 const groupRoutes=require('./Routes/GroupRoutes')
 const whatsappprovider=require('./Routes/WhatsappRoutes');
 const emailProvider=require('./Routes/EmailProviderRoutes')
+const campaign=require('./Routes/CampaignRoutes')
 
 dotenv.config();
 const app = express();
@@ -27,6 +28,7 @@ app.use('/api/customers', customerRoutes);
 app.use('/api/groups',groupRoutes);
 app.use('/api/whatsapp',whatsappprovider)
 app.use('/api/email',emailProvider)
+app.use('/api/campaign',campaign)
 
 // Global error handler (catches multer and other errors)
 app.use((err, req, res, next) => {
