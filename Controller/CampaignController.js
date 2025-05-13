@@ -4,6 +4,8 @@ const Group = require('../Model/Groups');
 const Message = require('../Model/Message');
 const sendEmail = require('../Utils/SendEmail');
 const { processCampaign } = require('../Utils/Scheduler');
+const XLSX = require('xlsx');
+const fs = require('fs');
 
 // Create a new campaign
 exports.createCampaign = async (req, res) => {
@@ -16,7 +18,29 @@ exports.createCampaign = async (req, res) => {
 
     const userId = req.userId;
 
-    // Validate attachment
+    // 📁 Step 1: Extract from uploaded Excel if audienceType is 'import'
+    let importedCustomersFromFile = [];
+
+    if (audienceType === 'import' && req.file) {
+      const workbook = XLSX.readFile(req.file.path);
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const data = XLSX.utils.sheet_to_json(sheet);
+
+      // Clean up file after reading
+      fs.unlink(req.file.path, err => {
+        if (err) console.error("Error deleting uploaded file:", err);
+      });
+
+      // Extract valid emails
+      importedCustomersFromFile = data
+        .filter(row => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email))
+        .map(row => ({
+          name: row.name || '',
+          email: row.email
+        }));
+    }
+
+    // ✅ Validate attachment
     if (attachmentUrl) {
       try {
         await validateAttachmentUrl(attachmentUrl);
@@ -25,33 +49,30 @@ exports.createCampaign = async (req, res) => {
       }
     }
 
-    // Handle scheduling
+    // 🕓 Handle scheduling
     let scheduledDateTime = null;
     let isScheduled = false;
-    
+
     if (scheduledAt) {
-      // Parse the scheduledAt string to a Date object
       scheduledDateTime = new Date(scheduledAt);
-      
-      // Check if it's a valid date
       if (isNaN(scheduledDateTime)) {
         return res.status(400).json({ error: 'Invalid date format for scheduledAt' });
       }
-      
-      // Compare with current time to determine if it's in the future
       const now = new Date();
       isScheduled = scheduledDateTime > now;
-      
-      console.log(`Scheduling: Time provided (${scheduledDateTime}) > current time (${now}) = ${isScheduled}`);
+      console.log(`Scheduling: Time provided (${scheduledDateTime}) > now (${now}) = ${isScheduled}`);
     }
 
+    // 🧾 Create campaign
     const campaign = new Campaign({
       userId,
       campaignName,
       campaignType,
       audienceType,
       groupId: audienceType === 'group' ? groupId : null,
-      importedCustomers: audienceType === 'import' ? importedCustomers : [],
+      importedCustomers: audienceType === 'import'
+        ? (importedCustomersFromFile.length > 0 ? importedCustomersFromFile : importedCustomers || [])
+        : [],
       scheduledAt: isScheduled ? scheduledDateTime : null,
       status: isScheduled ? 'pending' : 'processing'
     });
@@ -75,7 +96,7 @@ exports.createCampaign = async (req, res) => {
       });
     }
 
-    // Process immediately only if not scheduled
+    // 📨 Process immediately
     console.log('Processing campaign immediately');
     processCampaign(campaign._id)
       .catch(err => console.error(`Immediate campaign error: ${err.message}`));
@@ -92,6 +113,7 @@ exports.createCampaign = async (req, res) => {
     res.status(500).json({ error: 'Failed to create campaign' });
   }
 };
+
 
 // Rest of the code remains the same...
 // More extensive debug logging for the scheduler
