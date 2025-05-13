@@ -10,14 +10,17 @@ cron.schedule('* * * * *', async () => {
   try {
     console.log('Checking for scheduled campaigns...');
     const now = new Date();
-    
-    // Find campaigns that are scheduled and due to run
+  
+    const nowISOString = now.toISOString(); // Use this for UTC comparison
+    console.log(`Current UTC time: ${nowISOString}`);
+
     const campaigns = await Campaign.find({
-      status: 'pending',
-      scheduledAt: { $lte: now }
+      status: 'scheduled',
+      scheduledAt: { $lte: nowISOString }
     });
-    
-    console.log(`Found ${campaigns.length} campaigns to process`);
+
+    console.log(`Found ${campaigns.length} campaigns to process  ${nowISOString}`);
+   
     
     for (const campaign of campaigns) {
       try {
@@ -26,6 +29,8 @@ cron.schedule('* * * * *', async () => {
         console.log(`Processing campaign: ${campaign.campaignName} (ID: ${campaign._id})`);
         
         await processCampaign(campaign._id);
+        console.log(`Campaign scheduledAt: ${campaign.scheduledAt.toISOString()}, Current time: ${nowISOString}`);
+
       } catch (err) {
         console.error(`Error processing campaign ${campaign._id}:`, err.message);
         // Update campaign to failed status
