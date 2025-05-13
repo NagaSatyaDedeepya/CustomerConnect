@@ -1,18 +1,66 @@
 const mongoose = require('mongoose');
 
 const campaignSchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  campaignName: { type: String, required: true },
-  campaignType: { type: String, enum: ['email', 'whatsapp'], required: true },
-  audienceType: { type: String, enum: ['all', 'group', 'import'], required: true },
-  groupId: { type: mongoose.Schema.Types.ObjectId, ref: 'Group' },  // required if audienceType is 'group'
-  importedCustomers: [{  // required if audienceType is 'import'
-    fullName: String,
-    email: String,
-    phoneNumber: String
-  }],
-  status: { type: String, enum: ['pending', 'completed'], default: 'pending' },
-  scheduledAt: { type: Date }, // null if sent immediately
-}, { timestamps: true });
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
+  campaignName: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  campaignType: {
+    type: String,
+    enum: ['email', 'sms', 'push'],
+    default: 'email'
+  },
+  audienceType: {
+    type: String,
+    enum: ['all', 'group', 'import'],
+    required: true
+  },
+  groupId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Group',
+    default: null
+  },
+  importedCustomers: {
+    type: Array,
+    default: []
+  },
+  scheduledAt: {
+    type: Date,
+    default: null
+  },
+  status: {
+    type: String,
+    enum: ['pending', 'scheduled', 'processing', 'completed', 'failed'],
+    default: 'pending'
+  },
+  results: {
+    totalProcessed: {
+      type: Number,
+      default: 0
+    },
+    successCount: {
+      type: Number,
+      default: 0
+    },
+    failureCount: {
+      type: Number,
+      default: 0
+    }
+  },
+  error: {
+    type: String,
+    default: null
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
+});
 
 module.exports = mongoose.model('Campaign', campaignSchema);

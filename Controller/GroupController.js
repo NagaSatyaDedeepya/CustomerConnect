@@ -57,5 +57,20 @@ const getCustomersByGroupId = async (req, res) => {
     res.status(500).json({ error: 'Internal Server Error' });
   }
 };
+const getGroupNamesByUserId = async (req, res) => {
+   userId = req.userId;
 
-module.exports = { createGroup,getCustomersByGroupId  };
+  try {
+    const groups = await Group.find({ userId }).select('GroupName');
+
+    // Extract just the group names if you want plain strings
+    const groupNames = groups.map(group => group.GroupName);
+
+    res.status(200).json({ groupNames });
+  } catch (error) {
+    console.error('Error fetching group names:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+};
+
+module.exports = { createGroup,getCustomersByGroupId ,getGroupNamesByUserId };

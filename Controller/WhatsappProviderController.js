@@ -143,7 +143,7 @@ const sendWhatsAppToGroup = async (req, res) => {
         apiKey,
         campaignName,
         destination: `91${customer.phoneNumber}`,
-        userName: "Private Limited",
+        userName: "Incrivelsoft Private Limited",
         templateParams: [fullName, customMessage], // 👈 Name + offer/message
         source: "new-landing-page form",
         media: {
