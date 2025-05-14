@@ -13,7 +13,7 @@ exports.createCampaign = async (req, res) => {
     let {
       campaignName, campaignType, audienceType,
       groupId, importedCustomers, scheduledAt,
-      content, attachmentUrl,templateName
+      content, attachmentUrl, templateName
     } = req.body;
 
     const userId = req.userId;
@@ -120,7 +120,7 @@ exports.createCampaign = async (req, res) => {
     res.status(500).json({ error: 'Failed to create campaign' });
   }
 };
-// Fix for Campaign Controller
+
 const processCampaign = async (campaignId, campaign, message) => {
   try {
     let recipients = [];
@@ -128,75 +128,97 @@ const processCampaign = async (campaignId, campaign, message) => {
     if (campaign.audienceType === 'group' && campaign.groupId) {
       const group = await Group.findById(campaign.groupId);
       if (!group) throw new Error('Group not found');
-      recipients = await Customer.find({ _id: { $in: group.customerIds } });
+      
+      // Get the full customer records from the database
+      const customers = await Customer.find({ _id: { $in: group.customerIds } });
+      
+      // Transform customer data to ensure consistent structure with imported contacts
+      recipients = customers.map(customer => ({
+        _id: customer._id,
+        name: customer.name || customer.fullName || '',
+        fullName: customer.fullName || customer.name || '',
+        email: customer.email || '',
+        phone: customer.phone || customer.phoneNumber || '',
+        phoneNumber: customer.phoneNumber || customer.phone || ''
+      }));
     } else if (campaign.audienceType === 'import') {
-      recipients = campaign.importedCustomers;
+      recipients = campaign.importedCustomers || [];
     }
 
     const results = [];
 
     for (const cust of recipients) {
       try {
+        // Normalize customer data to handle different field names
+        const fullName = cust.fullName || cust.name || 'User';
+        const phone = cust.phone || cust.phoneNumber || null;
+        const email = cust.email || null;
+        const customerId = cust._id || null;
+
         if (campaign.campaignType === 'email') {
-          await sendEmail(
-            campaign.userId,
-            cust.email,
-            campaign.campaignName || 'Campaign',
-            message.content,
-            message.attachmentUrl
-          );
-          results.push({ email: cust.email, status: 'sent' });
-        }
-        else if (campaign.campaignType === 'whatsapp') {
-          // Extract required data for WhatsApp
-          const phoneNumber = cust.phoneNumber || cust.phone; // Handle both field names
-          const fullName = cust.fullName || cust.name; // Handle both field names
-          
-          if (!phoneNumber) {
-            results.push({ 
-              customerId: cust._id || null,
-              fullName: fullName || 'Unknown',
+          if (!email) {
+            results.push({
+              customerId,
+              fullName,
               status: 'failed',
-              error: 'Missing phone number in customer record'
+              error: 'Missing email address'
             });
             continue;
           }
 
-          try {
-            await sendWhatsApp(
-              campaign.userId,
-              phoneNumber,
-              fullName || 'User',
-              campaign.campaignName || 'Campaign',
-              campaign.templateName,
-              message.attachmentUrl
-            );
-            
-            results.push({ 
-              customerId: cust._id || null,
-              fullName: fullName || 'Unknown',
-              phone: phoneNumber,
-              status: 'sent' 
-            });
-            
-          } catch (err) {
-            results.push({
-              customerId: cust._id || null,
-              fullName: fullName || 'Unknown',
-              phone: phoneNumber,
-              status: 'failed',
-              error: err.message
-            });
-          }
+          await sendEmail(
+            campaign.userId,
+            email,
+            campaign.campaignName || 'Campaign',
+            message.content,
+            message.attachmentUrl
+          );
+
+          results.push({ 
+            customerId,
+            fullName,
+            email,
+            status: 'sent' 
+          });
         }
-      } catch (err) {
+
+        else if (campaign.campaignType === 'whatsapp') {
+          if (!phone) {
+            results.push({
+              customerId,
+              fullName,
+              status: 'failed',
+              error: 'Missing phone number'
+            });
+            continue;
+          }
+
+          await sendWhatsApp(
+            campaign.userId,
+            phone,
+            fullName,
+            campaign.campaignName || 'Campaign',
+            campaign.templateName,
+            message.attachmentUrl
+          );
+
+          results.push({
+            customerId,
+            fullName,
+            phone,
+            status: 'sent'
+          });
+        }
+
+      } catch (innerErr) {
+        console.error(`Error processing recipient: ${innerErr.message}`);
         results.push({
           customerId: cust._id || null,
           fullName: cust.fullName || cust.name || 'Unknown',
           email: cust.email || null,
-          phone: cust.phoneNumber || cust.phone || null,
+          phone: cust.phone || cust.phoneNumber || null,
           status: 'failed',
-          error: err.message
+          error: innerErr.message
         });
       }
     }
