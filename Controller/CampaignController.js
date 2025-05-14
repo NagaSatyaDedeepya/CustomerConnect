@@ -1,13 +1,13 @@
-const Campaign = require('../Model/Campagin');
+const Campaign = require('../Model/Campagin'); 
 const Customer = require('../Model/Customer');
 const Group = require('../Model/Groups');
 const Message = require('../Model/Message');
 const sendEmail = require('../Utils/SendEmail');
-const sendWhatsApp = require('../Utils/Sendwhatsapp'); // AiSensy implementation
+const sendWhatsApp = require('../Utils/Sendwhatsapp'); 
 const XLSX = require('xlsx');
 const fs = require('fs');
 const axios = require('axios');
-
+const { processCampaign } = require('../Utils/Scheduler'); 
 // Create a new campaign
 exports.createCampaign = async (req, res) => {
   try {
@@ -91,7 +91,7 @@ exports.createCampaign = async (req, res) => {
         ? (importedCustomersFromFile.length > 0 ? importedCustomersFromFile : importedCustomers || [])
         : [],
       scheduledAt: isScheduled ? scheduledDateTime : null,
-      status: isScheduled ? 'pending' : 'processing'
+      status: isScheduled ? 'scheduled' : 'processing' // Set status to 'scheduled' if it has a future date
     });
     await campaign.save();
 
@@ -112,8 +112,8 @@ exports.createCampaign = async (req, res) => {
       });
     }
 
-    // Process immediately
-    processCampaign(campaign._id, campaign, message);
+    // Process immediately if not scheduled
+    processCampaign(campaign._id);
 
     res.status(201).json({
       campaign,
@@ -125,130 +125,6 @@ exports.createCampaign = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to create campaign' });
-  }
-};
-
-// Campaign processor with audienceType 'all' added
-const processCampaign = async (campaignId, _campaign, _message) => {
-  try {
-    const campaign = await Campaign.findById(campaignId);
-    const message = await Message.findOne({ campaignId });
-
-    if (!campaign || !message) {
-      throw new Error('Campaign or message not found');
-    }
-
-    let recipients = [];
-
-    if (campaign.audienceType === 'all') {
-      recipients = await Customer.find();
-      console.log('Recipients (All):', recipients);
-
-    }  else if (campaign.audienceType === 'group') {
-  if (!campaign.groupId) throw new Error('groupId is not defined');
-
-  // Get customers by `group` field instead of using group.customerIds
-  recipients = await Customer.find({ group: campaign.groupId });
-
-  if (recipients.length === 0) {
-    throw new Error('Group has no customers.');
-  }
-
-  console.log('Recipients (Group):', recipients);
-
-
-    } else if (campaign.audienceType === 'import') {
-      recipients = campaign.importedCustomers || [];
-      console.log('Recipients (Import):', recipients);
-    }
-
-    const results = [];
-
-    for (const cust of recipients) {
-      try {
-        // Normalize customer data to handle different field names
-        const fullName = cust.fullName || cust.name || 'User';
-        const phone = cust.phone || cust.phoneNumber || null;
-        const email = cust.email || null;
-        const customerId = cust._id || null;
-
-        if (campaign.campaignType === 'email') {
-          await sendEmail(
-            campaign.userId,
-            cust.email,
-            campaign.campaignName || 'Campaign',
-            message.content,
-            message.attachmentUrl
-          );
-          results.push({ email: cust.email, status: 'sent' });
-
-        } else if (campaign.campaignType === 'whatsapp') {
-          const phoneNumber = cust.phoneNumber || cust.phone;
-          const fullName = cust.fullName || cust.name;
-
-          if (!phoneNumber) {
-            results.push({
-              customerId: cust._id || null,
-              fullName: fullName || 'Unknown',
-              status: 'failed',
-              error: 'Missing email address'
-            });
-            continue;
-          }
-
-          try {
-            await sendWhatsApp(
-              campaign.userId,
-              phoneNumber,
-              fullName || 'User',
-              campaign.campaignName || 'Campaign',
-              campaign.templateName,
-              message.attachmentUrl
-            );
-
-            results.push({
-              customerId: cust._id || null,
-              fullName: fullName || 'Unknown',
-              phone: phoneNumber,
-              status: 'sent'
-            });
-
-          } catch (err) {
-            results.push({
-              customerId: cust._id || null,
-              fullName: fullName || 'Unknown',
-              phone: phoneNumber,
-              status: 'failed',
-              error: err.message
-            });
-          }
-        }
-
-      } catch (err) {
-        results.push({
-          customerId: cust._id || null,
-          fullName: cust.fullName || cust.name || 'Unknown',
-          email: cust.email || null,
-          phone: cust.phone || cust.phoneNumber || null,
-          status: 'failed',
-          error: innerErr.message
-        });
-      }
-    }
-
-    campaign.status = 'completed';
-    campaign.results = {
-      totalProcessed: results.length,
-      successCount: results.filter(r => r.status === 'sent').length,
-      failureCount: results.filter(r => r.status === 'failed').length,
-      details: results
-    };
-    await campaign.save();
-
-    console.log(`✅ Campaign ${campaignId} completed.`);
-  } catch (err) {
-    console.error(`❌ Failed to process campaign ${campaignId}: ${err.message}`);
-    await Campaign.findByIdAndUpdate(campaignId, { status: 'failed', error: err.message });
   }
 };
 
@@ -265,9 +141,9 @@ exports.sendCampaignNow = async (req, res) => {
     }
 
     await Campaign.findByIdAndUpdate(campaignId, { status: 'processing' });
-
-    const message = await Message.findOne({ campaignId });
-    processCampaign(campaignId, campaign, message);
+    
+    // Use the imported processCampaign function
+    processCampaign(campaignId);
 
     res.json({ message: 'Campaign sending started', status: 'processing' });
 

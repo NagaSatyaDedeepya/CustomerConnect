@@ -66,4 +66,4 @@ const campaignSchema = new mongoose.Schema({
     default: Date.now
   }
 });
-module.exports = mongoose.model('Campaign', campaignSchema);
+module.exports = mongoose.model('Campagin', campaignSchema);
