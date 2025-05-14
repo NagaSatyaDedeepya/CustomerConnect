@@ -6,6 +6,7 @@ const sendEmail = require('../Utils/SendEmail');
 const sendWhatsApp = require('../Utils/Sendwhatsapp'); // AiSensy implementation
 const XLSX = require('xlsx');
 const fs = require('fs');
+const axios = require('axios');
 
 // Create a new campaign
 exports.createCampaign = async (req, res) => {
@@ -13,12 +14,12 @@ exports.createCampaign = async (req, res) => {
     let {
       campaignName, campaignType, audienceType,
       groupId, importedCustomers, scheduledAt,
-      content, attachmentUrl,templateName
+      content, attachmentUrl, templateName
     } = req.body;
 
     const userId = req.userId;
 
-    // 📁 Step 1: Extract from uploaded Excel if audienceType is 'import'
+    // Step 1: Extract from uploaded Excel if audienceType is 'import'
     let importedCustomersFromFile = [];
 
     if (audienceType === 'import' && req.file) {
@@ -26,12 +27,11 @@ exports.createCampaign = async (req, res) => {
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const data = XLSX.utils.sheet_to_json(sheet);
 
-      // Clean up file after reading
+      // Clean up uploaded file
       fs.unlink(req.file.path, err => {
         if (err) console.error("Error deleting uploaded file:", err);
       });
 
-      // Extract valid emails
       importedCustomersFromFile = data
         .filter(row => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email))
         .map(row => ({
@@ -41,7 +41,7 @@ exports.createCampaign = async (req, res) => {
         }));
     }
 
-    // ✅ Validate attachment
+    // Validate attachment
     if (attachmentUrl) {
       try {
         await validateAttachmentUrl(attachmentUrl);
@@ -50,7 +50,7 @@ exports.createCampaign = async (req, res) => {
       }
     }
 
-    // 🕓 Handle scheduling
+    // Handle scheduling
     let scheduledDateTime = null;
     let isScheduled = false;
 
@@ -63,16 +63,16 @@ exports.createCampaign = async (req, res) => {
       isScheduled = scheduledDateTime > now;
     }
 
-    // ✅ Validate templateName for WhatsApp
+    // Validate template name for WhatsApp
     if (campaignType === 'whatsapp' && !templateName) {
       return res.status(400).json({ error: 'templateName is required for WhatsApp campaigns' });
     }
 
     if (campaignType !== 'whatsapp') {
-      templateName = null; // remove if not WhatsApp
+      templateName = null;
     }
 
-    // 🧾 Create campaign
+    // Create campaign
     const campaign = new Campaign({
       userId,
       campaignName,
@@ -105,7 +105,7 @@ exports.createCampaign = async (req, res) => {
       });
     }
 
-    // 📨 Process campaign immediately
+    // Process immediately
     processCampaign(campaign._id, campaign, message);
 
     res.status(201).json({
@@ -120,17 +120,39 @@ exports.createCampaign = async (req, res) => {
     res.status(500).json({ error: 'Failed to create campaign' });
   }
 };
-// Fix for Campaign Controller
-const processCampaign = async (campaignId, campaign, message) => {
+
+// Campaign processor with audienceType 'all' added
+const processCampaign = async (campaignId, _campaign, _message) => {
   try {
+    const campaign = await Campaign.findById(campaignId);
+    const message = await Message.findOne({ campaignId });
+
+    if (!campaign || !message) {
+      throw new Error('Campaign or message not found');
+    }
+
     let recipients = [];
 
-    if (campaign.audienceType === 'group' && campaign.groupId) {
-      const group = await Group.findById(campaign.groupId);
-      if (!group) throw new Error('Group not found');
-      recipients = await Customer.find({ _id: { $in: group.customerIds } });
+    if (campaign.audienceType === 'all') {
+      recipients = await Customer.find();
+      console.log('Recipients (All):', recipients);
+
+    }  else if (campaign.audienceType === 'group') {
+  if (!campaign.groupId) throw new Error('groupId is not defined');
+
+  // Get customers by `group` field instead of using group.customerIds
+  recipients = await Customer.find({ group: campaign.groupId });
+
+  if (recipients.length === 0) {
+    throw new Error('Group has no customers.');
+  }
+
+  console.log('Recipients (Group):', recipients);
+
+
     } else if (campaign.audienceType === 'import') {
-      recipients = campaign.importedCustomers;
+      recipients = campaign.importedCustomers || [];
+      console.log('Recipients (Import):', recipients);
     }
 
     const results = [];
@@ -146,14 +168,13 @@ const processCampaign = async (campaignId, campaign, message) => {
             message.attachmentUrl
           );
           results.push({ email: cust.email, status: 'sent' });
-        }
-        else if (campaign.campaignType === 'whatsapp') {
-          // Extract required data for WhatsApp
-          const phoneNumber = cust.phoneNumber || cust.phone; // Handle both field names
-          const fullName = cust.fullName || cust.name; // Handle both field names
-          
+
+        } else if (campaign.campaignType === 'whatsapp') {
+          const phoneNumber = cust.phoneNumber || cust.phone;
+          const fullName = cust.fullName || cust.name;
+
           if (!phoneNumber) {
-            results.push({ 
+            results.push({
               customerId: cust._id || null,
               fullName: fullName || 'Unknown',
               status: 'failed',
@@ -171,14 +192,14 @@ const processCampaign = async (campaignId, campaign, message) => {
               campaign.templateName,
               message.attachmentUrl
             );
-            
-            results.push({ 
+
+            results.push({
               customerId: cust._id || null,
               fullName: fullName || 'Unknown',
               phone: phoneNumber,
-              status: 'sent' 
+              status: 'sent'
             });
-            
+
           } catch (err) {
             results.push({
               customerId: cust._id || null,
@@ -189,6 +210,7 @@ const processCampaign = async (campaignId, campaign, message) => {
             });
           }
         }
+
       } catch (err) {
         results.push({
           customerId: cust._id || null,
@@ -209,8 +231,8 @@ const processCampaign = async (campaignId, campaign, message) => {
       details: results
     };
     await campaign.save();
-    console.log(`✅ Campaign ${campaignId} completed.`);
 
+    console.log(`✅ Campaign ${campaignId} completed.`);
   } catch (err) {
     console.error(`❌ Failed to process campaign ${campaignId}: ${err.message}`);
     await Campaign.findByIdAndUpdate(campaignId, { status: 'failed', error: err.message });
@@ -264,8 +286,6 @@ exports.getCampaignStatus = async (req, res) => {
 
 // Validate attachment
 const validateAttachmentUrl = async (url) => {
-  const axios = require('axios');
-
   if (!url.startsWith('http://') && !url.startsWith('https://')) {
     throw new Error('URL must start with http:// or https://');
   }
