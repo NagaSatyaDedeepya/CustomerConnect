@@ -13,8 +13,8 @@ cron.schedule('* * * * *', async () => {
     
     // Find all pending campaigns where scheduledAt is in the past or present
     const campaigns = await Campaign.find({
-      status: 'pending',
-      scheduledAt: { $lte: now }
+      status: 'scheduled',
+      scheduledAt: { $lte: nowISOString }
     });
     
     console.log(`⏰ Scheduler: Found ${campaigns.length} due campaigns`);
@@ -31,6 +31,8 @@ cron.schedule('* * * * *', async () => {
         console.log(`Processing campaign: ${campaign._id} (${campaign.campaignName})`);
         await Campaign.findByIdAndUpdate(campaign._id, { status: 'processing' });
         await processCampaign(campaign._id);
+        console.log(`Campaign scheduledAt: ${campaign.scheduledAt.toISOString()}, Current time: ${nowISOString}`);
+
       } catch (err) {
         console.error(`❌ Campaign ${campaign._id} error:`, err.message);
         await Campaign.findByIdAndUpdate(campaign._id, {

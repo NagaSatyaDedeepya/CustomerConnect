@@ -6,6 +6,7 @@ const sendEmail = require('../Utils/SendEmail');
 const sendWhatsApp = require('../Utils/Sendwhatsapp'); // AiSensy implementation
 const XLSX = require('xlsx');
 const fs = require('fs');
+const axios = require('axios');
 
 // Create a new campaign
 exports.createCampaign = async (req, res) => {
@@ -18,7 +19,7 @@ exports.createCampaign = async (req, res) => {
 
     const userId = req.userId;
 
-    // 📁 Step 1: Extract from uploaded Excel if audienceType is 'import'
+    // Step 1: Extract from uploaded Excel if audienceType is 'import'
     let importedCustomersFromFile = [];
 
     if (audienceType === 'import' && req.file) {
@@ -26,22 +27,28 @@ exports.createCampaign = async (req, res) => {
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const data = XLSX.utils.sheet_to_json(sheet);
 
-      // Clean up file after reading
+      // Clean up uploaded file
       fs.unlink(req.file.path, err => {
         if (err) console.error("Error deleting uploaded file:", err);
       });
 
-      // Extract valid emails
       importedCustomersFromFile = data
-        .filter(row => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email))
+        .filter(row => {
+          if (campaignType === 'email') {
+            return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email);
+          } else if (campaignType === 'whatsapp') {
+            return row.phoneNumber || row.mobile || row.whatsapp;
+          }
+          return false;
+        })
         .map(row => ({
-          name: row.name || '',
-          email: row.email,
-          phone: row.phone || row.mobile || row.whatsapp
+          name: row.fullName || row.name || 'User',
+          email: row.email || '',
+          phone: row.phoneNumber || row.mobile || row.whatsapp || ''
         }));
     }
 
-    // ✅ Validate attachment
+    // Validate attachment
     if (attachmentUrl) {
       try {
         await validateAttachmentUrl(attachmentUrl);
@@ -50,7 +57,7 @@ exports.createCampaign = async (req, res) => {
       }
     }
 
-    // 🕓 Handle scheduling
+    // Handle scheduling
     let scheduledDateTime = null;
     let isScheduled = false;
 
@@ -63,16 +70,16 @@ exports.createCampaign = async (req, res) => {
       isScheduled = scheduledDateTime > now;
     }
 
-    // ✅ Validate templateName for WhatsApp
+    // Validate template name for WhatsApp
     if (campaignType === 'whatsapp' && !templateName) {
       return res.status(400).json({ error: 'templateName is required for WhatsApp campaigns' });
     }
 
     if (campaignType !== 'whatsapp') {
-      templateName = null; // remove if not WhatsApp
+      templateName = null;
     }
 
-    // 🧾 Create campaign
+    // Create campaign
     const campaign = new Campaign({
       userId,
       campaignName,
@@ -105,7 +112,7 @@ exports.createCampaign = async (req, res) => {
       });
     }
 
-    // 📨 Process campaign immediately
+    // Process immediately
     processCampaign(campaign._id, campaign, message);
 
     res.status(201).json({
@@ -121,28 +128,38 @@ exports.createCampaign = async (req, res) => {
   }
 };
 
-const processCampaign = async (campaignId, campaign, message) => {
+// Campaign processor with audienceType 'all' added
+const processCampaign = async (campaignId, _campaign, _message) => {
   try {
+    const campaign = await Campaign.findById(campaignId);
+    const message = await Message.findOne({ campaignId });
+
+    if (!campaign || !message) {
+      throw new Error('Campaign or message not found');
+    }
+
     let recipients = [];
 
-    if (campaign.audienceType === 'group' && campaign.groupId) {
-      const group = await Group.findById(campaign.groupId);
-      if (!group) throw new Error('Group not found');
-      
-      // Get the full customer records from the database
-      const customers = await Customer.find({ _id: { $in: group.customerIds } });
-      
-      // Transform customer data to ensure consistent structure with imported contacts
-      recipients = customers.map(customer => ({
-        _id: customer._id,
-        name: customer.name || customer.fullName || '',
-        fullName: customer.fullName || customer.name || '',
-        email: customer.email || '',
-        phone: customer.phone || customer.phoneNumber || '',
-        phoneNumber: customer.phoneNumber || customer.phone || ''
-      }));
+    if (campaign.audienceType === 'all') {
+      recipients = await Customer.find();
+      console.log('Recipients (All):', recipients);
+
+    }  else if (campaign.audienceType === 'group') {
+  if (!campaign.groupId) throw new Error('groupId is not defined');
+
+  // Get customers by `group` field instead of using group.customerIds
+  recipients = await Customer.find({ group: campaign.groupId });
+
+  if (recipients.length === 0) {
+    throw new Error('Group has no customers.');
+  }
+
+  console.log('Recipients (Group):', recipients);
+
+
     } else if (campaign.audienceType === 'import') {
       recipients = campaign.importedCustomers || [];
+      console.log('Recipients (Import):', recipients);
     }
 
     const results = [];
@@ -156,62 +173,58 @@ const processCampaign = async (campaignId, campaign, message) => {
         const customerId = cust._id || null;
 
         if (campaign.campaignType === 'email') {
-          if (!email) {
+          await sendEmail(
+            campaign.userId,
+            cust.email,
+            campaign.campaignName || 'Campaign',
+            message.content,
+            message.attachmentUrl
+          );
+          results.push({ email: cust.email, status: 'sent' });
+
+        } else if (campaign.campaignType === 'whatsapp') {
+          const phoneNumber = cust.phoneNumber || cust.phone;
+          const fullName = cust.fullName || cust.name;
+
+          if (!phoneNumber) {
             results.push({
-              customerId,
-              fullName,
+              customerId: cust._id || null,
+              fullName: fullName || 'Unknown',
               status: 'failed',
               error: 'Missing email address'
             });
             continue;
           }
 
-          await sendEmail(
-            campaign.userId,
-            email,
-            campaign.campaignName || 'Campaign',
-            message.content,
-            message.attachmentUrl
-          );
+          try {
+            await sendWhatsApp(
+              campaign.userId,
+              phoneNumber,
+              fullName || 'User',
+              campaign.campaignName || 'Campaign',
+              campaign.templateName,
+              message.attachmentUrl
+            );
 
-          results.push({ 
-            customerId,
-            fullName,
-            email,
-            status: 'sent' 
-          });
-        }
-
-        else if (campaign.campaignType === 'whatsapp') {
-          if (!phone) {
             results.push({
-              customerId,
-              fullName,
-              status: 'failed',
-              error: 'Missing phone number'
+              customerId: cust._id || null,
+              fullName: fullName || 'Unknown',
+              phone: phoneNumber,
+              status: 'sent'
             });
-            continue;
+
+          } catch (err) {
+            results.push({
+              customerId: cust._id || null,
+              fullName: fullName || 'Unknown',
+              phone: phoneNumber,
+              status: 'failed',
+              error: err.message
+            });
           }
-
-          await sendWhatsApp(
-            campaign.userId,
-            phone,
-            fullName,
-            campaign.campaignName || 'Campaign',
-            campaign.templateName,
-            message.attachmentUrl
-          );
-
-          results.push({
-            customerId,
-            fullName,
-            phone,
-            status: 'sent'
-          });
         }
 
-      } catch (innerErr) {
-        console.error(`Error processing recipient: ${innerErr.message}`);
+      } catch (err) {
         results.push({
           customerId: cust._id || null,
           fullName: cust.fullName || cust.name || 'Unknown',
@@ -231,8 +244,8 @@ const processCampaign = async (campaignId, campaign, message) => {
       details: results
     };
     await campaign.save();
-    console.log(`✅ Campaign ${campaignId} completed.`);
 
+    console.log(`✅ Campaign ${campaignId} completed.`);
   } catch (err) {
     console.error(`❌ Failed to process campaign ${campaignId}: ${err.message}`);
     await Campaign.findByIdAndUpdate(campaignId, { status: 'failed', error: err.message });
@@ -286,8 +299,6 @@ exports.getCampaignStatus = async (req, res) => {
 
 // Validate attachment
 const validateAttachmentUrl = async (url) => {
-  const axios = require('axios');
-
   if (!url.startsWith('http://') && !url.startsWith('https://')) {
     throw new Error('URL must start with http:// or https://');
   }
