@@ -13,8 +13,12 @@ const campaignSchema = new mongoose.Schema({
   },
   campaignType: {
     type: String,
-    enum: ['email', 'sms', 'push'],
+    enum: ['email', 'sms', 'push', 'whatsapp'], // Added 'whatsapp'
     default: 'email'
+  },
+  templateName: {
+    type: String,
+    default: null
   },
   audienceType: {
     type: String,
@@ -62,5 +66,4 @@ const campaignSchema = new mongoose.Schema({
     default: Date.now
   }
 });
-
 module.exports = mongoose.model('Campaign', campaignSchema);

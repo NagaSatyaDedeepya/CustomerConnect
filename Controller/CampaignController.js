@@ -1,19 +1,19 @@
-const Campaign = require('../Model/Campagin'); // Fixed typo in import
+const Campaign = require('../Model/Campagin');
 const Customer = require('../Model/Customer');
 const Group = require('../Model/Groups');
 const Message = require('../Model/Message');
 const sendEmail = require('../Utils/SendEmail');
-const { processCampaign } = require('../Utils/Scheduler');
+const sendWhatsApp = require('../Utils/Sendwhatsapp'); // AiSensy implementation
 const XLSX = require('xlsx');
 const fs = require('fs');
 
 // Create a new campaign
 exports.createCampaign = async (req, res) => {
   try {
-    const {
+    let {
       campaignName, campaignType, audienceType,
       groupId, importedCustomers, scheduledAt,
-      content, attachmentUrl
+      content, attachmentUrl,templateName
     } = req.body;
 
     const userId = req.userId;
@@ -36,7 +36,8 @@ exports.createCampaign = async (req, res) => {
         .filter(row => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email))
         .map(row => ({
           name: row.name || '',
-          email: row.email
+          email: row.email,
+          phone: row.phone || row.mobile || row.whatsapp
         }));
     }
 
@@ -60,7 +61,15 @@ exports.createCampaign = async (req, res) => {
       }
       const now = new Date();
       isScheduled = scheduledDateTime > now;
-      console.log(`Scheduling: Time provided (${scheduledDateTime}) > now (${now}) = ${isScheduled}`);
+    }
+
+    // ✅ Validate templateName for WhatsApp
+    if (campaignType === 'whatsapp' && !templateName) {
+      return res.status(400).json({ error: 'templateName is required for WhatsApp campaigns' });
+    }
+
+    if (campaignType !== 'whatsapp') {
+      templateName = null; // remove if not WhatsApp
     }
 
     // 🧾 Create campaign
@@ -68,6 +77,7 @@ exports.createCampaign = async (req, res) => {
       userId,
       campaignName,
       campaignType,
+      templateName,
       audienceType,
       groupId: audienceType === 'group' ? groupId : null,
       importedCustomers: audienceType === 'import'
@@ -86,20 +96,17 @@ exports.createCampaign = async (req, res) => {
     await message.save();
 
     if (isScheduled) {
-      console.log(`Campaign scheduled for: ${scheduledDateTime}`);
-      return res.status(201).json({ 
-        campaign, 
-        message, 
-        status: 'scheduled', 
+      return res.status(201).json({
+        campaign,
+        message,
+        status: 'scheduled',
         scheduledAt: scheduledDateTime,
         message: 'Campaign scheduled successfully.'
       });
     }
 
-    // 📨 Process immediately
-    console.log('Processing campaign immediately');
-    processCampaign(campaign._id)
-      .catch(err => console.error(`Immediate campaign error: ${err.message}`));
+    // 📨 Process campaign immediately
+    processCampaign(campaign._id, campaign, message);
 
     res.status(201).json({
       campaign,
@@ -113,10 +120,102 @@ exports.createCampaign = async (req, res) => {
     res.status(500).json({ error: 'Failed to create campaign' });
   }
 };
+// Fix for Campaign Controller
+const processCampaign = async (campaignId, campaign, message) => {
+  try {
+    let recipients = [];
 
+    if (campaign.audienceType === 'group' && campaign.groupId) {
+      const group = await Group.findById(campaign.groupId);
+      if (!group) throw new Error('Group not found');
+      recipients = await Customer.find({ _id: { $in: group.customerIds } });
+    } else if (campaign.audienceType === 'import') {
+      recipients = campaign.importedCustomers;
+    }
 
-// Rest of the code remains the same...
-// More extensive debug logging for the scheduler
+    const results = [];
+
+    for (const cust of recipients) {
+      try {
+        if (campaign.campaignType === 'email') {
+          await sendEmail(
+            campaign.userId,
+            cust.email,
+            campaign.campaignName || 'Campaign',
+            message.content,
+            message.attachmentUrl
+          );
+          results.push({ email: cust.email, status: 'sent' });
+        }
+        else if (campaign.campaignType === 'whatsapp') {
+          // Extract required data for WhatsApp
+          const phoneNumber = cust.phoneNumber || cust.phone; // Handle both field names
+          const fullName = cust.fullName || cust.name; // Handle both field names
+          
+          if (!phoneNumber) {
+            results.push({ 
+              customerId: cust._id || null,
+              fullName: fullName || 'Unknown',
+              status: 'failed',
+              error: 'Missing phone number in customer record'
+            });
+            continue;
+          }
+
+          try {
+            await sendWhatsApp(
+              campaign.userId,
+              phoneNumber,
+              fullName || 'User',
+              campaign.campaignName || 'Campaign',
+              campaign.templateName,
+              message.attachmentUrl
+            );
+            
+            results.push({ 
+              customerId: cust._id || null,
+              fullName: fullName || 'Unknown',
+              phone: phoneNumber,
+              status: 'sent' 
+            });
+            
+          } catch (err) {
+            results.push({
+              customerId: cust._id || null,
+              fullName: fullName || 'Unknown',
+              phone: phoneNumber,
+              status: 'failed',
+              error: err.message
+            });
+          }
+        }
+      } catch (err) {
+        results.push({
+          customerId: cust._id || null,
+          fullName: cust.fullName || cust.name || 'Unknown',
+          email: cust.email || null,
+          phone: cust.phoneNumber || cust.phone || null,
+          status: 'failed',
+          error: err.message
+        });
+      }
+    }
+
+    campaign.status = 'completed';
+    campaign.results = {
+      totalProcessed: results.length,
+      successCount: results.filter(r => r.status === 'sent').length,
+      failureCount: results.filter(r => r.status === 'failed').length,
+      details: results
+    };
+    await campaign.save();
+    console.log(`✅ Campaign ${campaignId} completed.`);
+
+  } catch (err) {
+    console.error(`❌ Failed to process campaign ${campaignId}: ${err.message}`);
+    await Campaign.findByIdAndUpdate(campaignId, { status: 'failed', error: err.message });
+  }
+};
 
 // Manually trigger sending of a campaign
 exports.sendCampaignNow = async (req, res) => {
@@ -132,8 +231,8 @@ exports.sendCampaignNow = async (req, res) => {
 
     await Campaign.findByIdAndUpdate(campaignId, { status: 'processing' });
 
-    processCampaign(campaignId)
-      .catch(err => console.error(`Manual trigger error: ${err.message}`));
+    const message = await Message.findOne({ campaignId });
+    processCampaign(campaignId, campaign, message);
 
     res.json({ message: 'Campaign sending started', status: 'processing' });
 
